@@ -1,0 +1,25 @@
+{
+    "f317bf36-8a43-4d71-be7b-0335e42ef206": {
+        "id": "f317bf36-8a43-4d71-be7b-0335e42ef206",
+        "name": "Back Camera",
+        "rtsp_url": "rtsp://admin:SrxnS@2005@117.214.232.84:554/Streaming/Channels/101",
+        "created_at": "2025-04-28T15:15:52.659451",
+        "updated_at": "2025-04-28T15:20:48.751215",
+        "filters": [
+            {
+                "filter_id": "ollamavision-7y0r",
+                "filter_name": "OllamaVision",
+                "enabled": true
+            }
+        ],
+        "stream_status": true,
+        "validation_result": {
+            "is_valid": true,
+            "message": "Stream validated successfully",
+            "frame_width": 2688,
+            "frame_height": 1520,
+            "response_time": 1.82,
+            "timestamp": 1745833552.659471
+        }
+    }
+}

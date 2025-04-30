@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.env
+
+# Video files
+*.mp4
+*.avi
+*.mov
+*.wmv
+*.flv
+*.mkv
+
+# Log files
+*.log
+backend.log
+
+# Data
+data/unauthorized/images/
+data/unauthorized/generated_content/
+data/unauthorized/recordings/
+
+# Model files (large binary files)
+*.pt
+*.caffemodel
+*.onnx
+*.h5
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+*.ipynb
+
+# MacOS specific
+.DS_Store
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Training data and runs
+runs/
+logs/
+
+# Debug
+**/debug/

@@ -69,9 +69,9 @@ class GunnyBagVideoCounter:
         if not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
         
-        # Set class IDs for detection - use a LOWER confidence threshold
-        # 0.1 instead of 0.3 to catch more potential detections
-        self.confidence_threshold = 0.1
+        # Set class IDs for detection - use a MUCH LOWER confidence threshold
+        # 0.05 instead of 0.1 to catch more potential detections
+        self.confidence_threshold = 0.05
         
         if is_custom_model:
             # For custom trained model, gunny bag is class 0

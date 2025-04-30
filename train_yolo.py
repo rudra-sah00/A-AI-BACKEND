@@ -109,16 +109,29 @@ def train_yolo_model(data_yaml, model_name="yolov8n.pt", epochs=50, batch_size=1
     try:
         # Load the base model
         model = YOLO(model_name)
-        
-        # Train the model
+         
         results = model.train(
             data=data_yaml,
             epochs=epochs,
             batch=batch_size,
             imgsz=imgsz,
-            patience=10,
+            patience=15,  # Increased patience for better convergence
             save=True,
-            device=0 if os.environ.get("CUDA_VISIBLE_DEVICES") else "cpu"
+            device=0 if os.environ.get("CUDA_VISIBLE_DEVICES") else "cpu",
+            # Enhanced data augmentation settings
+            mosaic=1.0,          # Increase mosaic augmentation probability
+            mixup=0.2,           # Enable mixup augmentation
+            degrees=15.0,        # Rotation augmentation
+            translate=0.2,       # Translation augmentation
+            scale=0.8,           # More aggressive scaling
+            shear=5.0,           # Shear augmentation
+            perspective=0.0005,  # Perspective transform
+            flipud=0.2,          # Flip up-down
+            fliplr=0.5,          # Flip left-right
+            hsv_h=0.015,         # HSV hue augmentation
+            hsv_s=0.7,           # HSV saturation augmentation
+            hsv_v=0.4,           # HSV value augmentation
+            copy_paste=0.2       # Copy-paste augmentation
         )
         
         # Get the path to the best model - the attribute access has changed in newer versions

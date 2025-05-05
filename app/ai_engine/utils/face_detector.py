@@ -14,6 +14,15 @@ except ImportError:
     HAVE_FACE_RECOGNITION = False
     logging.warning("face_recognition library not available, falling back to OpenCV")
 
+# Import InsightFace for enhanced low resolution face detection
+try:
+    import insightface
+    from insightface.app import FaceAnalysis
+    HAVE_INSIGHTFACE = True
+except ImportError:
+    HAVE_INSIGHTFACE = False
+    logging.warning("InsightFace library not available, using alternative methods")
+
 logger = logging.getLogger(__name__)
 
 class FaceDetector:
@@ -39,6 +48,20 @@ class FaceDetector:
         # Initialize multiple detection methods for redundancy and improved accuracy
         self.detection_methods = []
         
+        # 0. Try to use InsightFace (best for low-resolution and challenging images)
+        try:
+            if HAVE_INSIGHTFACE:
+                # Initialize InsightFace with appropriate models
+                self.insightface_app = FaceAnalysis(
+                    name='buffalo_l',  # Using light model for better speed/accuracy balance
+                    providers=['CPUExecutionProvider']  # Using CPU for compatibility
+                )
+                self.insightface_app.prepare(ctx_id=0, det_size=(640, 640))
+                self.detection_methods.insert(0, self._detect_faces_insightface)
+                logger.info("Initialized InsightFace detector (best for low-resolution)")
+        except Exception as e:
+            logger.warning(f"Failed to initialize InsightFace: {e}")
+            
         # 1. Try to use dlib's HOG face detector (most accurate for profile faces)
         try:
             if HAVE_FACE_RECOGNITION:
@@ -130,7 +153,24 @@ class FaceDetector:
             logger.warning(f"Failed to initialize nose detector: {e}")
             
         logger.info(f"Face detector initialized with {len(self.detection_methods)} detection methods")
+    
+    def _detect_faces_insightface(self, image) -> List[Tuple[int, int, int, int]]:
+        """Detect faces using InsightFace - excellent for low-resolution/challenging images"""
+        if not HAVE_INSIGHTFACE:
+            return []
         
+        try:
+            # InsightFace expects BGR (OpenCV default)
+            faces = self.insightface_app.get(image)
+            
+            # Convert to (x, y, w, h) format
+            return [(int(face.bbox[0]), int(face.bbox[1]), 
+                    int(face.bbox[2] - face.bbox[0]), int(face.bbox[3] - face.bbox[1])) 
+                    for face in faces]
+        except Exception as e:
+            logger.error(f"Error in InsightFace detection: {str(e)}")
+            return []
+    
     def _detect_faces_dlib_hog(self, image) -> List[Tuple[int, int, int, int]]:
         """Detect faces using dlib's HOG face detector"""
         if not HAVE_FACE_RECOGNITION:
@@ -711,43 +751,29 @@ class FaceDetector:
         if face1 is None or face2 is None or face1.size == 0 or face2.size == 0:
             return False, 0.0
             
-        if not HAVE_FACE_RECOGNITION:
-            # Fall back to simple comparison if face_recognition not available
-            # Resize both to same size
-            face1_resized = cv2.resize(face1, (128, 128))
-            face2_resized = cv2.resize(face2, (128, 128))
-            
-            # Convert to grayscale
-            if face1_resized.ndim > 2:
-                face1_gray = cv2.cvtColor(face1_resized, cv2.COLOR_BGR2GRAY)
-            else:
-                face1_gray = face1_resized
-                
-            if face2_resized.ndim > 2:
-                face2_gray = cv2.cvtColor(face2_resized, cv2.COLOR_BGR2GRAY)
-            else:
-                face2_gray = face2_resized
-                
-            # Compare using structural similarity
+        # Try InsightFace first (most accurate for low resolution)
+        if HAVE_INSIGHTFACE:
             try:
-                from skimage.metrics import structural_similarity as ssim
-                score = ssim(face1_gray, face2_gray)
+                # Extract embeddings using InsightFace
+                faces1 = self.insightface_app.get(face1)
+                faces2 = self.insightface_app.get(face2)
                 
-                # Consider faces similar if score is above threshold
-                is_same = score > 0.7
-                return is_same, score
-            except:
-                # If skimage not available, use normalized correlation
-                result = cv2.matchTemplate(face1_gray, face2_gray, cv2.TM_CCORR_NORMED)
-                score = result[0][0]
-                
-                # Normalize score to 0-1 range
-                score = (score + 1.0) / 2.0
-                
-                # Consider faces similar if score is above threshold
-                is_same = score > 0.75
-                return is_same, score
-        else:
+                if len(faces1) > 0 and len(faces2) > 0:
+                    # Get the first detected face embedding in each image
+                    embedding1 = faces1[0].embedding
+                    embedding2 = faces2[0].embedding
+                    
+                    # Calculate cosine similarity
+                    similarity = np.dot(embedding1, embedding2) / (np.linalg.norm(embedding1) * np.linalg.norm(embedding2))
+                    
+                    # InsightFace similarity threshold
+                    is_same = similarity > 0.5  # Adjust threshold as needed
+                    return is_same, similarity
+            except Exception as e:
+                logger.warning(f"InsightFace comparison error: {str(e)}, falling back to other methods")
+    
+        # Fall back to face_recognition if available
+        if HAVE_FACE_RECOGNITION:
             # Use face_recognition for more accurate comparison
             # Convert to RGB (face_recognition expects RGB)
             if face1.shape[2] == 3:
@@ -776,8 +802,43 @@ class FaceDetector:
                 is_same = similarity > self.identical_face_threshold
                 return is_same, similarity
             except Exception as e:
-                logger.warning(f"Face comparison error: {str(e)}")
-                return False, 0.0
+                logger.warning(f"Face comparison error: {str(e)}, falling back to basic methods")
+        
+        # Fall back to simple comparison as last resort
+        # Resize both to same size
+        face1_resized = cv2.resize(face1, (128, 128))
+        face2_resized = cv2.resize(face2, (128, 128))
+        
+        # Convert to grayscale
+        if face1_resized.ndim > 2:
+            face1_gray = cv2.cvtColor(face1_resized, cv2.COLOR_BGR2GRAY)
+        else:
+            face1_gray = face1_resized
+            
+        if face2_resized.ndim > 2:
+            face2_gray = cv2.cvtColor(face2_resized, cv2.COLOR_BGR2GRAY)
+        else:
+            face2_gray = face2_resized
+            
+        # Compare using structural similarity
+        try:
+            from skimage.metrics import structural_similarity as ssim
+            score = ssim(face1_gray, face2_gray)
+            
+            # Consider faces similar if score is above threshold
+            is_same = score > 0.7
+            return is_same, score
+        except:
+            # If skimage not available, use normalized correlation
+            result = cv2.matchTemplate(face1_gray, face2_gray, cv2.TM_CCORR_NORMED)
+            score = result[0][0]
+            
+            # Normalize score to 0-1 range
+            score = (score + 1.0) / 2.0
+            
+            # Consider faces similar if score is above threshold
+            is_same = score > 0.75
+            return is_same, score
     
     def find_matching_face(self, face_image, face_list):
         """

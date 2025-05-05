@@ -14,11 +14,20 @@ from app.ai_engine.processors.base_processor import BaseProcessor
 from app.ai_engine.models.yolo_model import YOLOModel
 from app.ai_engine.utils.face_detector import FaceDetector
 
+# Import InsightFace for enhanced low resolution face detection
+try:
+    import insightface
+    from insightface.app import FaceAnalysis
+    HAVE_INSIGHTFACE = True
+except ImportError:
+    HAVE_INSIGHTFACE = False
+    logging.warning("InsightFace library not available, using alternative methods")
+
 logger = logging.getLogger(__name__)
 
 class AuthorizedEntryProcessor(BaseProcessor):
     """
-    Processor for authorized entry rules
+    Processor for authorized entry rules with enhanced face recognition using InsightFace
     """
     def __init__(self, rule_data: Dict, camera_data: Dict, users_data: Dict, output_dir: str):
         super().__init__(rule_data, camera_data, users_data, output_dir)
@@ -28,6 +37,21 @@ class AuthorizedEntryProcessor(BaseProcessor):
         
         # Initialize enhanced face detector with advanced capabilities
         self.face_detector = FaceDetector(min_face_size=(50, 50))  # Increase min face size for better quality
+        
+        # Initialize InsightFace for better low-resolution face recognition
+        self.insightface_analyzer = None
+        if HAVE_INSIGHTFACE:
+            try:
+                # Initialize InsightFace with appropriate models
+                self.insightface_analyzer = FaceAnalysis(
+                    name='buffalo_l',  # Using light model for better speed/accuracy balance
+                    providers=['CPUExecutionProvider']  # Using CPU for compatibility
+                )
+                self.insightface_analyzer.prepare(ctx_id=0, det_size=(640, 640))
+                logger.info("Initialized InsightFace for enhanced face recognition")
+            except Exception as e:
+                logger.warning(f"Failed to initialize InsightFace: {e}")
+                self.insightface_analyzer = None
         
         # Get rule-specific data
         self.rule_condition = rule_data.get("condition", {})
@@ -51,6 +75,9 @@ class AuthorizedEntryProcessor(BaseProcessor):
         
         # Person absence tracking
         self.person_absence_time = {}  # Track when person was last marked as absent
+        
+        # Face embeddings cache for faster recognition
+        self.face_embeddings_cache = {}  # Cache face embeddings for authorized users
         
         # Image directory for unauthorized detections
         self.unauthorized_images_dir = os.path.join(self.output_dir, "images")
@@ -77,7 +104,10 @@ class AuthorizedEntryProcessor(BaseProcessor):
         # Keep track of last presence state for each unauthorized person
         self.person_presence_state = {}  # To track if a person has left and returned
         
-        logger.info(f"Initialized AuthorizedEntryProcessor for role: {self.authorized_role}")
+        # InsightFace similarity threshold (adjust based on testing)
+        self.insightface_similarity_threshold = 0.45  # Lower is stricter
+        
+        logger.info(f"Initialized AuthorizedEntryProcessor for role: {self.authorized_role} with InsightFace: {HAVE_INSIGHTFACE}")
     
     def _load_unauthorized_logs(self):
         """Load unauthorized logs from file"""
@@ -100,7 +130,7 @@ class AuthorizedEntryProcessor(BaseProcessor):
             logger.error(f"Error saving unauthorized logs: {str(e)}")
     
     def _load_reference_images(self) -> Dict:
-        """Load all reference images for authorized users with improved face extraction"""
+        """Load all reference images for authorized users with improved face extraction using InsightFace"""
         reference_images = {}
         
         for username, user_data in self.users_data.items():
@@ -124,8 +154,31 @@ class AuthorizedEntryProcessor(BaseProcessor):
                     if image is None:
                         logger.error(f"Failed to load image for user {username}: {photo_path}")
                         continue
-                        
-                    # Try to detect faces with our advanced detector
+                    
+                    # Try InsightFace first for better face extraction
+                    face_embedding = None
+                    if HAVE_INSIGHTFACE and self.insightface_analyzer:
+                        faces = self.insightface_analyzer.get(image)
+                        if len(faces) > 0:
+                            # Get the most confident face
+                            best_face = max(faces, key=lambda x: x.det_score)
+                            face_img = image[int(best_face.bbox[1]):int(best_face.bbox[3]), 
+                                          int(best_face.bbox[0]):int(best_face.bbox[2])].copy()
+                            face_embedding = best_face.embedding
+                            
+                            reference_images[username] = {
+                                "image": face_img,
+                                "user_data": user_data,
+                                "quality": 0.9,  # InsightFace detections are usually high quality
+                                "embedding": face_embedding
+                            }
+                            logger.info(f"Loaded InsightFace reference for {username}")
+                            
+                            # Cache the face embedding for faster comparison
+                            self.face_embeddings_cache[username] = face_embedding
+                            continue
+                    
+                    # Fall back to our regular face detector
                     faces = self.face_detector.detect_faces(image)
                     
                     if faces:
@@ -449,8 +502,47 @@ class AuthorizedEntryProcessor(BaseProcessor):
             self._save_unauthorized_logs()
             logger.debug(f"Updated unauthorized logs for person {person_id} with new best face for today")
 
+    def _compare_with_insightface(self, face_img, reference_data):
+        """Compare a face with reference data using InsightFace for better accuracy"""
+        if not HAVE_INSIGHTFACE or self.insightface_analyzer is None:
+            return False, 0.0
+            
+        try:
+            # Check if we already have embedding in the reference data
+            ref_embedding = reference_data.get("embedding")
+            
+            if ref_embedding is None:
+                # Get embedding from reference image
+                ref_img = reference_data["image"]
+                ref_faces = self.insightface_analyzer.get(ref_img)
+                
+                if len(ref_faces) == 0:
+                    return False, 0.0
+                    
+                ref_embedding = ref_faces[0].embedding
+            
+            # Get embedding for detected face
+            faces = self.insightface_analyzer.get(face_img)
+            
+            if len(faces) == 0:
+                return False, 0.0
+                
+            test_embedding = faces[0].embedding
+            
+            # Calculate cosine similarity
+            similarity = np.dot(ref_embedding, test_embedding) / (np.linalg.norm(ref_embedding) * np.linalg.norm(test_embedding))
+            
+            # Consider it a match if similarity exceeds threshold
+            is_match = similarity > self.insightface_similarity_threshold
+            
+            return is_match, similarity
+            
+        except Exception as e:
+            logger.warning(f"InsightFace comparison error: {e}")
+            return False, 0.0
+
     def _process_frame(self, frame):
-        """Process a frame for authorized entry detection with improved face handling"""
+        """Process a frame for authorized entry detection with improved face handling and InsightFace"""
         if frame is None or frame.size == 0:
             return
             
@@ -496,7 +588,7 @@ class AuthorizedEntryProcessor(BaseProcessor):
                 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             debug_path = os.path.join(self.debug_dir, f"person_detections_{timestamp}.jpg")
-            cv2.imwrite(debug_path, debug_frame)
+            cv2.imwrite(debug_path)
         
         # Track if any unauthorized persons are detected in this frame
         unauthorized_detected = False
@@ -519,37 +611,69 @@ class AuthorizedEntryProcessor(BaseProcessor):
             person_img = frame[int(y1):int(y2), int(x1):int(x2)].copy()
             if person_img is None or person_img.size == 0:
                 continue
+            
+            # Try to detect face first with InsightFace for better low-resolution performance
+            best_face = None
+            best_rect = None
+            face_quality = 0.0
+            is_insightface_detection = False
+            
+            if HAVE_INSIGHTFACE and self.insightface_analyzer:
+                try:
+                    insightface_results = self.insightface_analyzer.get(person_img)
+                    if insightface_results and len(insightface_results) > 0:
+                        # Get the highest confidence face
+                        best_insightface = max(insightface_results, key=lambda x: x.det_score)
+                        face_x1, face_y1, face_x2, face_y2 = map(int, best_insightface.bbox)
+                        
+                        # Extract face image
+                        if (face_x1 < face_x2 and face_y1 < face_y2 and
+                            face_x1 >= 0 and face_y1 >= 0 and
+                            face_x2 <= person_img.shape[1] and face_y2 <= person_img.shape[0]):
+                            
+                            best_face = person_img[face_y1:face_y2, face_x1:face_x2].copy()
+                            best_rect = (face_x1, face_y1, face_x2-face_x1, face_y2-face_y1)
+                            face_quality = best_insightface.det_score  # Use detection score as quality
+                            is_insightface_detection = True
+                            
+                            logger.debug(f"InsightFace detected face with quality {face_quality:.2f}")
+                except Exception as e:
+                    logger.warning(f"InsightFace detection error: {e}")
+                    
+            # If InsightFace didn't find a face or wasn't available, fall back to regular detection
+            if best_face is None:
+                # Try to detect face in the person image using multiple methods
+                faces = self.face_detector.detect_faces(person_img)
                 
-            # Debug: Save extracted person image
-            if self.debug_mode:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-                debug_person_path = os.path.join(self.debug_dir, f"person_{timestamp}.jpg")
-                cv2.imwrite(debug_person_path, person_img)
-            
-            # Try to detect face in the person image using multiple methods
-            faces = self.face_detector.detect_faces(person_img)
-            
-            # Debug: Save face detection results
-            if self.debug_mode and faces:
-                faces_drawn = self.face_detector.draw_face_rectangles(person_img, faces, color=(0, 0, 255))
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-                debug_faces_path = os.path.join(self.debug_dir, f"faces_{timestamp}.jpg")
-                cv2.imwrite(debug_faces_path, faces_drawn)
-            
-            # Get best face with quality score
-            best_face, best_rect, face_quality = self.face_detector.get_best_face(person_img, faces)
+                # Debug: Save face detection results
+                if self.debug_mode and faces:
+                    faces_drawn = self.face_detector.draw_face_rectangles(person_img, faces, color=(0, 0, 255))
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                    debug_faces_path = os.path.join(self.debug_dir, f"faces_{timestamp}.jpg")
+                    cv2.imwrite(debug_faces_path, faces_drawn)
+                
+                # Get best face with quality score
+                best_face, best_rect, face_quality = self.face_detector.get_best_face(person_img, faces)
             
             # Check if this is a front-facing face
             is_front_facing = False
             front_confidence = 0.0
+            
             if best_face is not None:
-                is_front_facing, front_confidence = self._is_front_facing_face(best_face, best_rect)
-                face_quality = face_quality * front_confidence  # Adjust quality based on front-facing confidence
+                # If we're using InsightFace, we trust its detection more
+                if is_insightface_detection:
+                    is_front_facing = True
+                    front_confidence = 0.9  # InsightFace is good at finding front-facing faces
+                else:
+                    is_front_facing, front_confidence = self._is_front_facing_face(best_face, best_rect)
+                
+                face_quality = face_quality * front_confidence if not is_insightface_detection else face_quality
                 
                 # If not a front-facing face with good quality, try again with different detection
                 if not is_front_facing or face_quality < self.min_quality_threshold:
-                    logger.debug(f"Face rejected: not front-facing or low quality {face_quality:.2f}")
-                    best_face, best_rect, face_quality = None, None, 0.0
+                    if not is_insightface_detection:  # Only log this if it's not an InsightFace detection
+                        logger.debug(f"Face rejected: not front-facing or low quality {face_quality:.2f}")
+                        best_face, best_rect, face_quality = None, None, 0.0
             
             # If no good face found in the person image, try detecting directly in the frame
             if best_face is None or face_quality < self.min_quality_threshold:
@@ -567,32 +691,55 @@ class AuthorizedEntryProcessor(BaseProcessor):
                 # Extract region and detect faces
                 region = frame[region_y1:region_y2, region_x1:region_x2].copy()
                 if region.size > 0:
-                    region_faces = self.face_detector.detect_faces(region)
-                    if region_faces:
-                        # Adjust face coordinates to the original frame
-                        for i, (fx, fy, fw, fh) in enumerate(region_faces):
-                            region_faces[i] = (fx + region_x1, fy + region_y1, fw, fh)
-                        
-                        # Try to get the best face from the region
-                        best_face, best_rect, face_quality = self.face_detector.get_best_face(frame, region_faces)
-                        
-                        # Check if this is a front-facing face
-                        if best_face is not None:
-                            is_front_facing, front_confidence = self._is_front_facing_face(best_face, best_rect)
-                            face_quality = face_quality * front_confidence
+                    # Try InsightFace first on the region
+                    if HAVE_INSIGHTFACE and self.insightface_analyzer:
+                        try:
+                            insightface_results = self.insightface_analyzer.get(region)
+                            if insightface_results and len(insightface_results) > 0:
+                                # Get the highest confidence face
+                                best_insightface = max(insightface_results, key=lambda x: x.det_score)
+                                face_x1, face_y1, face_x2, face_y2 = map(int, best_insightface.bbox)
+                                
+                                # Adjust coordinates to the original frame
+                                face_x1 += region_x1
+                                face_y1 += region_y1
+                                face_x2 += region_x1
+                                face_y2 += region_y1
+                                
+                                # Extract face image from the original frame
+                                if (face_x1 < face_x2 and face_y1 < face_y2 and
+                                    face_x1 >= 0 and face_y1 >= 0 and
+                                    face_x2 <= frame_width and face_y2 <= frame_height):
+                                    
+                                    best_face = frame[face_y1:face_y2, face_x1:face_x2].copy()
+                                    best_rect = (face_x1, face_y1, face_x2-face_x1, face_y2-face_y1)
+                                    face_quality = best_insightface.det_score
+                                    is_front_facing = True
+                                    front_confidence = 0.9
+                                    is_insightface_detection = True
+                        except Exception as e:
+                            logger.warning(f"InsightFace region detection error: {e}")
+                    
+                    # Fall back to regular face detection if InsightFace didn't work
+                    if best_face is None:
+                        region_faces = self.face_detector.detect_faces(region)
+                        if region_faces:
+                            # Adjust face coordinates to the original frame
+                            for i, (fx, fy, fw, fh) in enumerate(region_faces):
+                                region_faces[i] = (fx + region_x1, fy + region_y1, fw, fh)
                             
-                            # If not a front-facing face with good quality, reject it
-                            if not is_front_facing or face_quality < self.min_quality_threshold:
-                                logger.debug(f"Region face rejected: not front-facing or low quality {face_quality:.2f}")
-                                best_face, best_rect, face_quality = None, None, 0.0
-                        
-                        # Debug: Save region with faces
-                        if self.debug_mode and region_faces:
-                            faces_drawn = self.face_detector.draw_face_rectangles(frame[region_y1:region_y2, region_x1:region_x2], 
-                                                                                self.face_detector.detect_faces(region))
-                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-                            debug_region_path = os.path.join(self.debug_dir, f"region_faces_{timestamp}.jpg")
-                            cv2.imwrite(debug_region_path, faces_drawn)
+                            # Try to get the best face from the region
+                            best_face, best_rect, face_quality = self.face_detector.get_best_face(frame, region_faces)
+                            
+                            # Check if this is a front-facing face
+                            if best_face is not None:
+                                is_front_facing, front_confidence = self._is_front_facing_face(best_face, best_rect)
+                                face_quality = face_quality * front_confidence
+                                
+                                # If not a front-facing face with good quality, reject it
+                                if not is_front_facing or face_quality < self.min_quality_threshold:
+                                    logger.debug(f"Region face rejected: not front-facing or low quality {face_quality:.2f}")
+                                    best_face, best_rect, face_quality = None, None, 0.0
             
             # Try to match with authorized users if we have a face
             is_authorized = False
@@ -602,35 +749,55 @@ class AuthorizedEntryProcessor(BaseProcessor):
                 # Debug: Save the detected face
                 if self.debug_mode:
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-                    debug_face_path = os.path.join(self.debug_dir, f"best_face_{timestamp}_{face_quality:.2f}_{'front' if is_front_facing else 'side'}.jpg")
+                    detection_type = "insightface" if is_insightface_detection else "regular"
+                    debug_face_path = os.path.join(self.debug_dir, 
+                        f"best_face_{timestamp}_{face_quality:.2f}_{detection_type}.jpg")
                     cv2.imwrite(debug_face_path, best_face)
                 
                 for username, ref_data in reference_images.items():
                     ref_img = ref_data["image"]
                     user_data = ref_data["user_data"]
                     
-                    # Compare faces - adjust threshold based on reference image quality
-                    ref_quality = ref_data.get("quality", 0.0)
-                    # Lower threshold for lower quality reference images
-                    match_threshold = 0.6 if ref_quality > 0.5 else 0.5
-                    
-                    is_match, similarity = self.model.compare_with_reference(best_face, ref_img, threshold=match_threshold)
-                    
-                    if is_match:
-                        is_authorized = True
-                        matched_user = username
-                        logger.info(f"Authorized entry: {username} detected at camera {camera_name} (similarity: {similarity:.2f})")
+                    # Try InsightFace comparison first for better accuracy
+                    if is_insightface_detection and HAVE_INSIGHTFACE and self.insightface_analyzer:
+                        is_match, similarity = self._compare_with_insightface(best_face, ref_data)
                         
-                        # Track this person as authorized
-                        self._get_or_create_tracker(frame, bbox_xywh, unauthorized=False)
-                        break
+                        if is_match:
+                            is_authorized = True
+                            matched_user = username
+                            logger.info(f"Authorized entry (InsightFace): {username} at camera {camera_name} (similarity: {similarity:.3f})")
+                            
+                            # Track this person as authorized
+                            self._get_or_create_tracker(frame, bbox_xywh, unauthorized=False)
+                            break
+                    
+                    # If InsightFace didn't match or isn't available, try regular comparison
+                    if not is_authorized:
+                        # Compare faces - adjust threshold based on reference image quality
+                        ref_quality = ref_data.get("quality", 0.0)
+                        # Lower threshold for lower quality reference images
+                        match_threshold = 0.6 if ref_quality > 0.5 else 0.5
+                        
+                        is_match, similarity = self.model.compare_with_reference(best_face, ref_img, threshold=match_threshold)
+                        
+                        if is_match:
+                            is_authorized = True
+                            matched_user = username
+                            logger.info(f"Authorized entry: {username} detected at camera {camera_name} (similarity: {similarity:.2f})")
+                            
+                            # Track this person as authorized
+                            self._get_or_create_tracker(frame, bbox_xywh, unauthorized=False)
+                            break
             
-            # If person not authorized, track and possibly log the unauthorized entry
+            # If person not authorized, handle similar to existing code
             if not is_authorized:
                 # Get or create tracker for this person
                 person_id = self._get_or_create_tracker(frame, bbox_xywh, unauthorized=True)
                 current_time = time.time()
                 person_tracker = self.person_trackers[person_id]
+                
+                # Rest of the unauthorized person handling remains the same
+                # ...existing code for unauthorized person detection...
                 
                 # Check if we already have an image for this person today
                 person_has_face_today = False
@@ -678,9 +845,9 @@ class AuthorizedEntryProcessor(BaseProcessor):
                 
                 # Determine if we should log this detection based on our conditions
                 should_log = (time_since_first_detection > 5.0 and  # Tracked for at least 5 seconds for better face
-                             (last_logged == 0 or  # Never logged before
+                            (last_logged == 0 or  # Never logged before
                               (time_since_last_log > self.detection_interval and  # Sufficient time passed
-                               (not person_has_face_today or person_returned))))  # Don't have face for today or person returned
+                              (not person_has_face_today or person_returned))))  # Don't have face for today or person returned
                 
                 if should_log:
                     # Get the best face we have for this person today
@@ -696,7 +863,7 @@ class AuthorizedEntryProcessor(BaseProcessor):
                         best_face_path = person_tracker.get("best_face_path")
                         best_face_quality = person_tracker.get("best_face_quality", 0)
                     
-                    # Create unauthorized entry log - referring to the existing face image
+                    # Create unauthorized entry log with detection method info
                     unauthorized_log = {
                         "id": str(uuid.uuid4()),
                         "person_id": person_id,
@@ -709,7 +876,8 @@ class AuthorizedEntryProcessor(BaseProcessor):
                         "confidence": float(confidence),
                         "bbox": [float(c) for c in bbox],  
                         "has_face": best_face_path is not None,
-                        "is_front_facing": person_tracker.get("is_front_facing", False)
+                        "is_front_facing": person_tracker.get("is_front_facing", False),
+                        "detection_method": "insightface" if is_insightface_detection else "standard"
                     }
                     
                     # Add to logs and save
@@ -722,7 +890,7 @@ class AuthorizedEntryProcessor(BaseProcessor):
                     logger.warning(f"Unauthorized entry detected at camera {camera_name}, has face: {best_face_path is not None}")
                     unauthorized_detected = True
                     
-                    # Save a context frame with faces highlighted - only if we don't have a face yet for this person today
+                    # Only save a context frame if needed for debugging
                     if not person_has_face_today and self.debug_mode:
                         detection_time = datetime.now().strftime("%Y%m%d_%H%M%S")
                         

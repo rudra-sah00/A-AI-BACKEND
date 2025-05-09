@@ -28,7 +28,7 @@ class OllamaVisionProcessor(BaseProcessor):
         # Gemini model configuration
         self.model = "gemini-2.0-flash"
         # Hard-coded API key for development stage
-        self.api_key = "AIzaSyCtmb0N6w8CX6M8y66gZVjnbkBV1ujwiWw"
+        self.api_key = "PLACE YOU API KEY HERE"
         logger.info(f"Using hard-coded API key for development: {self.api_key[:5]}...{self.api_key[-4:]}")
             
         self.gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"

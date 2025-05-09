@@ -1,0 +1,9 @@
+{
+  "query": "what do you see in the camera",
+  "response": "Okay, here is my analysis of the security camera feed:\n\n1. DIRECT ANSWER:\nI see people, chairs, motorcycles, a vehicle, and buildings.\n\n2. SCENE OVERVIEW:\nThe scene appears to be an outdoor street view at night. It is illuminated by street lights and building lights.\n\n3. SUBJECT IDENTIFICATION:\n*   I can see several people. Some are standing, and others are sitting on chairs.\n\n4. OBJECT DETECTION:\n*   There is a red vehicle with a cage-like back.\n*   Multiple motorcycles are parked on the street.\n*   There are several chairs.\n\n5. SECURITY ASSESSMENT:\nNORMAL. The scene appears to be a normal street scene.\n",
+  "camera_id": "1ea989cb-fe5e-4b08-9a46-3c785198d9a9",
+  "camera_name": "Front Main Road Camera",
+  "timestamp": "2025-05-09T19:59:23.084324",
+  "model": "gemini-2.0-flash",
+  "frame_path": "/Users/rudrasahoo/Development/A-AI-BACKEND/data/unauthorized/queries/20250509_195923_1ea989cb-fe5e-4b08-9a46-3c785198d9a9.jpg"
+}

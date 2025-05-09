@@ -3,6 +3,7 @@ fastapi>=0.95.0
 uvicorn>=0.21.1
 python-multipart>=0.0.6
 pydantic>=1.10.7
+pydantic-settings>=0.1.0  # Added for settings management
 
 # Video processing
 av>=10.0.0
@@ -13,6 +14,7 @@ ffmpeg-python>=0.2.0
 # WebRTC and streaming
 aiortc>=1.5.0
 aiohttp>=3.8.4
+websockets>=10.0 # Added for FastAPI WebSocket support
 
 # Async utilities
 asyncio>=3.4.3
@@ -41,3 +43,9 @@ pycocotools>=2.0.6  # COCO evaluation metrics
 # Development tools
 pytest>=7.3.1
 jupyter>=1.0.0
+
+
+insightface
+face_recognition
+
+

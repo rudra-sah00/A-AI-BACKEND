@@ -1,0 +1,9 @@
+{
+  "query": "How many people are visible in the corridor?",
+  "response": "1. DIRECT ANSWER: There are no people visible in the corridor in this image.\n\n2. SCENE OVERVIEW: The image shows an outdoor storage area or corridor with moderate lighting. The area contains various stored items.\n\n3. SUBJECT IDENTIFICATION: No individuals are visible.\n\n4. OBJECT DETECTION: The scene contains several large water tank containers, a black plastic chair, buckets, and some window frames. A security camera is mounted on the wall.\n\n5. SECURITY ASSESSMENT: NORMAL. No immediate security concerns are apparent.\n",
+  "camera_id": "4d7225f8-2375-40df-977b-49158bfcf64f",
+  "camera_name": "Corridor Camera",
+  "timestamp": "2025-05-09T19:48:40.705220",
+  "model": "gemini-2.0-flash",
+  "frame_path": "/Users/rudrasahoo/Development/A-AI-BACKEND/data/unauthorized/queries/20250509_194840_4d7225f8-2375-40df-977b-49158bfcf64f.jpg"
+}

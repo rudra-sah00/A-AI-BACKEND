@@ -1,0 +1,6 @@
+names:
+  0: gunny_bag_counting
+  1: gunny_bag_ignore
+path: /Users/rudrasahoo/Development/A-AI-BACKEND/data/gunny_bag_dataset
+train: /Users/rudrasahoo/Development/A-AI-BACKEND/data/gunny_bag_dataset/train
+val: /Users/rudrasahoo/Development/A-AI-BACKEND/data/gunny_bag_dataset/val

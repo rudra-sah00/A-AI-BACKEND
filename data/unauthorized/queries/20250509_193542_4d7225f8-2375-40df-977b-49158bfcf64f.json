@@ -1,0 +1,9 @@
+{
+  "query": "howmany people are there in this camera",
+  "response": "1. DIRECT ANSWER: I cannot identify any people in the image.\n\n2. SCENE OVERVIEW: The camera feed captures a cluttered outdoor or semi-outdoor storage area. The area has a concrete floor and is filled with plastic water storage tanks, a chair, buckets, and other miscellaneous items. Lighting appears dim and is provided by an unseen source.\n\n3. SUBJECT IDENTIFICATION: No individuals are visible in the frame.\n\n4. OBJECT DETECTION: Visible objects include:\n    - Multiple large plastic water storage tanks.\n    - A black plastic chair.\n    - Several buckets and containers.\n    - Stacks of window panes.\n    - A security camera.\n\n5. SECURITY ASSESSMENT: NORMAL. No immediate security concerns are evident based on the objects visible. The area appears to be a storage space.\n",
+  "camera_id": "4d7225f8-2375-40df-977b-49158bfcf64f",
+  "camera_name": "Corridor Camera",
+  "timestamp": "2025-05-09T19:35:42.421534",
+  "model": "gemini-2.0-flash",
+  "frame_path": "/Users/rudrasahoo/Development/A-AI-BACKEND/data/unauthorized/queries/20250509_193542_4d7225f8-2375-40df-977b-49158bfcf64f.jpg"
+}

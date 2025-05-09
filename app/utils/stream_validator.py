@@ -34,90 +34,100 @@ class StreamValidator:
         return urllib.parse.urlunparse(tuple(parts))
     
     @staticmethod
-    def validate_rtsp_stream(rtsp_url: str, timeout: int = 5) -> Dict[str, Any]:
+    def validate_rtsp_stream(rtsp_url, timeout=5.0, retry_attempts=3):
         """
-        Validates an RTSP stream by:
-        1. Attempting to connect to the stream
-        2. Capturing a frame
-        3. Verifying frame validity
+        Validate that an RTSP stream is accessible and can be read
+        Implements retry logic and better error handling for unreliable networks
         
         Args:
-            rtsp_url: The RTSP URL to validate
-            timeout: Maximum time (in seconds) to wait for connection
-        
+            rtsp_url: RTSP URL to validate
+            timeout: Maximum time (in seconds) to wait for stream connection
+            retry_attempts: Number of retry attempts before giving up
+            
         Returns:
             Dictionary with validation results
         """
-        start_time = time.time()
-        result = {
-            "is_valid": False,
-            "message": "Failed to validate stream",
-            "frame_width": 0,
-            "frame_height": 0,
-            "response_time": 0,
-            "timestamp": time.time()
-        }
+        if not rtsp_url:
+            return {"is_valid": False, "error_message": "No RTSP URL provided"}
+            
+        logger.info(f"Validating RTSP stream: {rtsp_url}")
         
-        try:
-            logger.info(f"Validating RTSP stream: {rtsp_url}")
+        # Add transport protocol directly to URL as a query parameter
+        rtsp_url_with_options = rtsp_url
+        if "?" not in rtsp_url_with_options:
+            rtsp_url_with_options += "?rtsp_transport=tcp"
+        else:
+            rtsp_url_with_options += "&rtsp_transport=tcp"
             
-            # Use the FFmpeg warning suppressor
-            with ffmpeg_suppressor:
-                # Additional OpenCV parameters to improve connection reliability
-                cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)  # Buffer size
+        # Try to open the stream multiple times
+        for attempt in range(retry_attempts):
+            try:
+                # Open the stream with only two arguments (compatible with OpenCV 4.11.0)
+                start_time = time.time()
+                cap = cv2.VideoCapture(rtsp_url_with_options, cv2.CAP_FFMPEG)
                 
-                # Set connection timeout
-                elapsed_time = 0
-                connection_timeout = timeout
-                
-                # Try to connect until timeout
-                while elapsed_time < connection_timeout:
-                    if cap.isOpened():
-                        break
-                    time.sleep(0.5)
-                    elapsed_time = time.time() - start_time
-                    
+                # Check if stream opened
                 if not cap.isOpened():
-                    result["message"] = f"Could not connect to stream within {timeout} seconds"
-                    return result
-                    
-                # Try to read a frame
-                ret, frame = cap.read()
-            
-            # Calculate response time
-            response_time = time.time() - start_time
-            result["response_time"] = round(response_time, 2)
-            
-            if not ret or frame is None:
-                result["message"] = "Connected to stream but could not read frame"
-                return result
+                    if attempt < retry_attempts - 1:
+                        logger.warning(f"Failed to open stream (attempt {attempt+1}/{retry_attempts}), retrying...")
+                        time.sleep(1)  # Wait before retrying
+                        continue
+                    return {"is_valid": False, "error_message": "Failed to open stream"}
                 
-            # Get frame dimensions
-            frame_height, frame_width = frame.shape[:2]
-            result["frame_width"] = frame_width
-            result["frame_height"] = frame_height
-            
-            # Check if frame has valid dimensions
-            if frame_width <= 0 or frame_height <= 0:
-                result["message"] = "Received invalid frame dimensions"
-                return result
+                # Try to read frames with timeout
+                success = False
+                frame_count = 0
+                max_frames = 5  # Try to read multiple frames for better validation
                 
-            # Success
-            result["is_valid"] = True
-            result["message"] = "Stream validated successfully"
-            
-            logger.info(f"RTSP stream validation successful: {rtsp_url}")
-            
-        except Exception as e:
-            logger.error(f"Error validating RTSP stream: {str(e)}")
-            result["message"] = f"Error: {str(e)}"
-        finally:
-            # Release the capture object
-            if 'cap' in locals() and cap is not None:
+                while time.time() - start_time < timeout and frame_count < max_frames:
+                    ret, frame = cap.read()
+                    if ret and frame is not None and frame.size > 0:
+                        success = True
+                        frame_count += 1
+                    else:
+                        # If we can't read a frame, try again
+                        if time.time() - start_time < timeout:
+                            time.sleep(0.1)  # Small delay before retry
+                        else:
+                            break
+                
+                # Clean up
                 cap.release()
                 
-        return result
+                if success:
+                    elapsed_time = time.time() - start_time
+                    logger.info(f"RTSP stream validated successfully ({frame_count} frames) in {elapsed_time:.2f}s")
+                    
+                    # Check if we got enough frames to consider the stream reliable
+                    if frame_count < 3:
+                        logger.warning(f"Stream validated but only {frame_count} frames read - might be unstable")
+                    
+                    return {
+                        "is_valid": True, 
+                        "frames_read": frame_count,
+                        "validation_time": elapsed_time
+                    }
+                
+                if attempt < retry_attempts - 1:
+                    logger.warning(f"Failed to read frames (attempt {attempt+1}/{retry_attempts}), retrying...")
+                    time.sleep(1)  # Wait before retrying
+                    continue
+                
+                return {
+                    "is_valid": False, 
+                    "error_message": "Could not read frames from stream",
+                    "frames_read": frame_count
+                }
+                
+            except Exception as e:
+                if attempt < retry_attempts - 1:
+                    logger.warning(f"Stream validation error (attempt {attempt+1}/{retry_attempts}): {str(e)}, retrying...")
+                    time.sleep(1)  # Wait before retrying
+                else:
+                    logger.error(f"Stream validation failed after {retry_attempts} attempts: {str(e)}")
+                    return {"is_valid": False, "error_message": str(e)}
+        
+        return {"is_valid": False, "error_message": "Failed to validate stream after multiple attempts"}
     
     @staticmethod
     def add_camera(camera_name: str, rtsp_url: str, validate: bool = True) -> Dict[str, Any]:

@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     # AI model settings
     AI_MODEL_PATH: str = Field(default="app/ai/models")
     ENABLE_GPU: bool = Field(default=False)
+    AI_ENGINE_MONITOR_INTERVAL_SECONDS: int = Field(default=30, env="AI_ENGINE_MONITOR_INTERVAL_SECONDS")
     
     # File upload settings
     MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024  # 10 MB

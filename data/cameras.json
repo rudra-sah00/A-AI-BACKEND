@@ -1,19 +1,65 @@
 {
-    "191a23be-9fd3-4645-b4ab-0665f39945d9": {
-        "id": "191a23be-9fd3-4645-b4ab-0665f39945d9",
-        "name": "Back Camera",
-        "rtsp_url": "rtsp://admin:SrxnS@2005@117.214.228.93:554/Streaming/Channels/101",
-        "created_at": "2025-05-01T13:18:49.790706",
-        "updated_at": null,
-        "filters": [],
+    "5f66baed-2889-481b-b801-86339034b3fa": {
+        "id": "5f66baed-2889-481b-b801-86339034b3fa",
+        "name": "Corridor Camera",
+        "rtsp_url": "rtsp://admin:SrxnS@2005@117.199.228.85:554/Streaming/Channels/401",
+        "created_at": "2025-05-09T19:53:42.910959",
+        "updated_at": "2025-05-09T19:57:25.300403",
+        "filters": [
+            {
+                "filter_id": "authorizedentry-4b8f",
+                "filter_name": "authorized_entry",
+                "enabled": true
+            }
+        ],
+        "is_active": true,
         "stream_status": true,
         "validation_result": {
             "is_valid": true,
-            "message": "Stream validated successfully",
-            "frame_width": 2688,
-            "frame_height": 1520,
-            "response_time": 1.68,
-            "timestamp": 1746085729.790765
+            "frames_read": 5,
+            "validation_time": 3.7777631282806396
+        }
+    },
+    "19b14fd5-6fe6-4cc1-8af2-f78ead10a818": {
+        "id": "19b14fd5-6fe6-4cc1-8af2-f78ead10a818",
+        "name": "Back camera",
+        "rtsp_url": "rtsp://admin:SrxnS@2005@117.199.228.85:554/Streaming/Channels/101",
+        "created_at": "2025-05-09T19:56:01.917375",
+        "updated_at": null,
+        "filters": [
+            {
+                "filter_id": "ollamavision-2lkz",
+                "filter_name": "OllamaVision",
+                "enabled": true
+            }
+        ],
+        "is_active": true,
+        "stream_status": true,
+        "validation_result": {
+            "is_valid": true,
+            "frames_read": 5,
+            "validation_time": 1.9535160064697266
+        }
+    },
+    "1ea989cb-fe5e-4b08-9a46-3c785198d9a9": {
+        "id": "1ea989cb-fe5e-4b08-9a46-3c785198d9a9",
+        "name": "Front Main Road Camera",
+        "rtsp_url": "rtsp://admin:SrxnS@2005@117.199.228.85:554/Streaming/Channels/501",
+        "created_at": "2025-05-09T19:56:29.234883",
+        "updated_at": null,
+        "filters": [
+            {
+                "filter_id": "ollamavision-36l4",
+                "filter_name": "OllamaVision",
+                "enabled": true
+            }
+        ],
+        "is_active": true,
+        "stream_status": true,
+        "validation_result": {
+            "is_valid": true,
+            "frames_read": 5,
+            "validation_time": 1.7773768901824951
         }
     }
 }

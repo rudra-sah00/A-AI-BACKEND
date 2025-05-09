@@ -45,6 +45,13 @@ class FaceDetector:
         self.cleanup_interval = 300  # Cleanup cache every 5 minutes
         self.identical_face_threshold = 0.6  # Threshold for face similarity (lower is stricter)
         
+        # Initialize cascade classifiers with proper error handling
+        self.face_cascade = None
+        self.eye_cascade = None
+        self.nose_cascade = None
+        self.profile_cascade = None
+        self.alt_face_cascade = None
+        
         # Initialize multiple detection methods for redundancy and improved accuracy
         self.detection_methods = []
         
@@ -100,6 +107,8 @@ class FaceDetector:
             if not self.face_cascade.empty():
                 self.detection_methods.append(self._detect_faces_haar)
                 logger.info("Initialized Haar cascade face detector")
+            else:
+                logger.warning("Haar cascade face detector is empty after initialization")
         except Exception as e:
             logger.warning(f"Failed to initialize Haar cascade face detector: {e}")
             
@@ -109,6 +118,8 @@ class FaceDetector:
             if not self.profile_cascade.empty():
                 self.detection_methods.append(self._detect_faces_profile)
                 logger.info("Initialized profile face detector")
+            else:
+                logger.warning("Profile face detector is empty after initialization")
         except Exception as e:
             logger.warning(f"Failed to initialize profile face detector: {e}")
             
@@ -118,6 +129,8 @@ class FaceDetector:
             if not self.alt_face_cascade.empty():
                 self.detection_methods.append(self._detect_faces_alt)
                 logger.info("Initialized alternative face detector for blurry images")
+            else:
+                logger.warning("Alternative face detector is empty after initialization")
         except Exception as e:
             logger.warning(f"Failed to initialize alternative face detector: {e}")
             
@@ -141,19 +154,95 @@ class FaceDetector:
         # 8. Initialize eye detector for better validation
         try:
             self.eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
-            logger.info("Initialized eye detector for validation")
+            if self.eye_cascade.empty():
+                logger.warning("Eye cascade classifier is empty after initialization")
+                self.eye_cascade = None
+            else:
+                logger.info("Initialized eye detector for validation")
         except Exception as e:
             logger.warning(f"Failed to initialize eye detector: {e}")
+            self.eye_cascade = None
         
         # 9. Initialize nose detector for improved face validation
         try:
             self.nose_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_mcs_nose.xml')
-            logger.info("Initialized nose detector for validation")
+            if self.nose_cascade.empty():
+                logger.warning("Nose cascade classifier is empty after initialization")
+                self.nose_cascade = None 
+            else:
+                logger.info("Initialized nose detector for validation")
         except Exception as e:
             logger.warning(f"Failed to initialize nose detector: {e}")
+            self.nose_cascade = None
             
         logger.info(f"Face detector initialized with {len(self.detection_methods)} detection methods")
     
+    def _non_max_suppression(self, boxes: np.ndarray, overlap_thresh: float) -> List[Tuple[int, int, int, int]]:
+        """
+        Apply non-maximum suppression to avoid overlapping bounding boxes.
+        Args:
+            boxes: Array of detections, each row is (x, y, w, h).
+            overlap_thresh: The threshold for Intersection over Union (IoU).
+        Returns:
+            A list of filtered bounding boxes as (x, y, w, h) tuples.
+        """
+        if len(boxes) == 0:
+            return []
+
+        # If the bounding boxes are integers, convert them to floats --
+        # this is important since we'll be doing a bunch of divisions
+        if boxes.dtype.kind == "i":
+            boxes = boxes.astype("float")
+
+        # Initialize the list of picked indexes
+        pick = []
+
+        # Grab the coordinates of the bounding boxes
+        x1 = boxes[:, 0]
+        y1 = boxes[:, 1]
+        # Convert width and height to x2, y2
+        x2 = boxes[:, 0] + boxes[:, 2]
+        y2 = boxes[:, 1] + boxes[:, 3]
+
+        # Compute the area of the bounding boxes and sort the bounding
+        # boxes by the bottom-right y-coordinate of the bounding box
+        area = (x2 - x1) * (y2 - y1) # Using (w*h) directly from input: (boxes[:, 2] * boxes[:, 3])
+        idxs = np.argsort(y2)
+
+        # Keep looping while some indexes still remain in the indexes list
+        while len(idxs) > 0:
+            # Grab the last index in the indexes list and add the
+            # index value to the list of picked indexes
+            last = len(idxs) - 1
+            i = idxs[last]
+            pick.append(i)
+
+            # Find the largest (x, y) coordinates for the start of
+            # the bounding box and the smallest (x, y) coordinates
+            # for the end of the bounding box
+            xx1 = np.maximum(x1[i], x1[idxs[:last]])
+            yy1 = np.maximum(y1[i], y1[idxs[:last]])
+            xx2 = np.minimum(x2[i], x2[idxs[:last]])
+            yy2 = np.minimum(x2[i], x2[idxs[:last]])
+
+            # Compute the width and height of the bounding box
+            w = np.maximum(0, xx2 - xx1)
+            h = np.maximum(0, xx2 - xx1)
+
+            # Compute the ratio of overlap
+            overlap = (w * h) / area[idxs[:last]]
+
+            # Delete all indexes from the index list that have overlap greater
+            # than the provided overlap threshold
+            idxs = np.delete(idxs, np.concatenate(([last], np.where(overlap > overlap_thresh)[0])))
+
+        # Return only the bounding boxes that were picked using the integer data type
+        # Convert back to (x, y, w, h)
+        final_boxes = []
+        for i in pick:
+            final_boxes.append((int(boxes[i][0]), int(boxes[i][1]), int(boxes[i][2]), int(boxes[i][3])))
+        return final_boxes
+
     def _detect_faces_insightface(self, image) -> List[Tuple[int, int, int, int]]:
         """Detect faces using InsightFace - excellent for low-resolution/challenging images"""
         if not HAVE_INSIGHTFACE:
@@ -449,45 +538,59 @@ class FaceDetector:
             gray_roi = cv2.cvtColor(face_roi, cv2.COLOR_BGR2GRAY)
             
             # 1. Check for eyes - strong indicator of a face
-            eyes = self.eye_cascade.detectMultiScale(
-                gray_roi,
-                scaleFactor=1.1,
-                minNeighbors=6,  # Increased from 5 to 6 for more reliable detection
-                minSize=(20, 20)
-            )
-            
-            # Add points for each eye detected in the upper half of the face
-            eye_count = 0
-            for (ex, ey, ew, eh) in eyes:
-                # Check that eyes are in the upper half of the face
-                if ey < h/2:
-                    validation_score += 0.25  # Each eye adds 0.25 to score
-                    eye_count += 1
-            
-            # Require at least one eye for minimum validation
-            if eye_count == 0:
-                validation_score -= 0.4  # Increased penalty for no eyes detected (was 0.3)
+            if hasattr(self, 'eye_cascade') and self.eye_cascade is not None and not self.eye_cascade.empty():
+                try:
+                    eyes = self.eye_cascade.detectMultiScale(
+                        gray_roi,
+                        scaleFactor=1.1,
+                        minNeighbors=6,  # Increased from 5 to 6 for more reliable detection
+                        minSize=(20, 20)
+                    )
+                    
+                    # Add points for each eye detected in the upper half of the face
+                    eye_count = 0
+                    for (ex, ey, ew, eh) in eyes:
+                        # Check that eyes are in the upper half of the face
+                        if ey < h/2:
+                            validation_score += 0.25  # Each eye adds 0.25 to score
+                            eye_count += 1
+                    
+                    # Require at least one eye for minimum validation
+                    if eye_count == 0:
+                        validation_score -= 0.4  # Increased penalty for no eyes detected (was 0.3)
+                except Exception as e:
+                    logger.warning(f"Eye detection failed: {str(e)}")
+                    eye_count = 0
+            else:
+                eye_count = 0
+                logger.warning("Eye cascade classifier is not available or empty")
             
             # 2. Check for nose - another face feature
-            nose = self.nose_cascade.detectMultiScale(
-                gray_roi,
-                scaleFactor=1.1,
-                minNeighbors=6,  # Increased from 5 to 6
-                minSize=(20, 20)
-            )
-            
             nose_detected = False
-            # Add points if a nose is detected in approximately the middle of the face
-            for (nx, ny, nw, nh) in nose:
-                # Check nose is roughly in the middle
-                if nx > w/4 and nx+nw < 3*w/4 and ny > h/4 and ny+nh < 3*h/4:
-                    validation_score += 0.25
-                    nose_detected = True
+            if hasattr(self, 'nose_cascade') and self.nose_cascade is not None and not self.nose_cascade.empty():
+                try:
+                    nose = self.nose_cascade.detectMultiScale(
+                        gray_roi,
+                        scaleFactor=1.1,
+                        minNeighbors=6,  # Increased from 5 to 6
+                        minSize=(20, 20)
+                    )
                     
-            # Penalize for no nose detection
-            if not nose_detected:
-                validation_score -= 0.3  # Increased penalty (was 0.2)
-                    
+                    # Add points if a nose is detected in approximately the middle of the face
+                    for (nx, ny, nw, nh) in nose:
+                        # Check nose is roughly in the middle
+                        if nx > w/4 and nx+nw < 3*w/4 and ny > h/4 and ny+nh < 3*h/4:
+                            validation_score += 0.25
+                            nose_detected = True
+                            
+                    # Penalize for no nose detection
+                    if not nose_detected:
+                        validation_score -= 0.3  # Increased penalty (was 0.2)
+                except Exception as e:
+                    logger.warning(f"Nose detection failed: {str(e)}")
+            else:
+                logger.warning("Nose cascade classifier is not available or empty")
+            
             # 3. Use facial landmarks for validation if available
             landmarks_detected = False
             if self.landmarks_predictor and HAVE_FACE_RECOGNITION:
@@ -510,19 +613,24 @@ class FaceDetector:
                     pass
             
             # 4. Check skin tone pattern
-            hsv_roi = cv2.cvtColor(face_roi, cv2.COLOR_BGR2HSV)
-            h, s, v = cv2.split(hsv_roi)
-            
-            # Check for typical skin hue range
-            # Convert to 0-180 scale for OpenCV HSV
-            skin_pixels = np.sum((h >= 0) & (h <= 30) | (h >= 150) & (h <= 180))
-            skin_ratio = skin_pixels / (w * h)
-            
-            # Add points for appropriate skin tone ratio
-            if skin_ratio > 0.6:  # Increased from 0.5 to 0.6
-                validation_score += 0.25
-            elif skin_ratio > 0.4:  # Increased from 0.3 to 0.4
-                validation_score += 0.1
+            try:
+                hsv_roi = cv2.cvtColor(face_roi, cv2.COLOR_BGR2HSV)
+                h, s, v = cv2.split(hsv_roi)
+                
+                # Check for typical skin hue range
+                # Convert to 0-180 scale for OpenCV HSV
+                # Fix: Use np.logical_or instead of | operator to combine conditions
+                skin_mask = np.logical_or((h >= 0) & (h <= 30), (h >= 150) & (h <= 180))
+                skin_pixels = np.sum(skin_mask)
+                skin_ratio = skin_pixels / (w * h)
+                
+                # Add points for appropriate skin tone ratio
+                if skin_ratio > 0.6:  # Increased from 0.5 to 0.6
+                    validation_score += 0.25
+                elif skin_ratio > 0.4:  # Increased from 0.3 to 0.4
+                    validation_score += 0.1
+            except Exception as e:
+                logger.warning(f"Skin tone check failed: {str(e)}")
                 
             # 5. Check symmetry - faces are generally symmetric
             # Split face in half and compare
@@ -576,6 +684,302 @@ class FaceDetector:
         except Exception as e:
             logger.warning(f"Face validation error: {str(e)}")
             return 0.0
+    
+    def detect_faces(self, image, min_validation_score=0.1):
+        """
+        Detect faces in an image using multiple detection methods
+        
+        Args:
+            image: OpenCV image
+            min_validation_score: Minimum validation score for multi-method confirmation
+            
+        Returns:
+            List of face rectangles in format (x, y, w, h)
+        """
+        if image is None or image.size == 0:
+            return []
+            
+        # Convert to grayscale for HOG and Haar detection
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+        
+        # Get image dimensions
+        h, w = image.shape[:2]
+        
+        # Apply light CLAHE normalization to improve contrasts in dark or bright images
+        # This helps significantly with glasses detection
+        norm_gray = self._normalize_image(gray)
+        
+        # Store all detected face rectangles
+        all_faces = []
+        
+        # Method 1: HOG face detector (good for frontal and slightly angled faces)
+        try:
+            hog_rects = self.hog_detector(norm_gray) if self.hog_detector else []
+            for rect in hog_rects:
+                # Convert dlib rectangle to OpenCV format
+                x, y = rect.left(), rect.top()
+                w, h = rect.width(), rect.height()
+                
+                # Only add if within image bounds
+                if x >= 0 and y >= 0 and x + w <= image.shape[1] and y + h <= image.shape[0]:
+                    face = {
+                        "rect": (x, y, w, h),
+                        "method": "hog",
+                        "score": 0.8  # HOG is generally reliable
+                    }
+                    all_faces.append(face)
+        except Exception as e:
+            logger.debug(f"HOG detector failed: {e}")
+        
+        # Method 2: Haar Cascade (good with frontal faces in good lighting)
+        try:
+            if self.face_cascade is not None:
+                # Setting minNeighbors=2 instead of the default 5 makes detection more permissive for glasses
+                haar_detections = self.face_cascade.detectMultiScale(
+                    norm_gray, 
+                    scaleFactor=1.1, 
+                    minNeighbors=2,  # Lower value for more permissive detection with glasses
+                    minSize=self.min_face_size
+                )
+                
+                for (x, y, w, h) in haar_detections:
+                    face = {
+                        "rect": (x, y, w, h),
+                        "method": "haar",
+                        "score": 0.7  # A bit less reliable than HOG
+                    }
+                    all_faces.append(face)
+        except Exception as e:
+            logger.debug(f"Haar cascade detector failed: {e}")
+        
+        # Method 3: Profile face detection
+        try:
+            if self.profile_cascade is not None:
+                # Try to detect profile faces - both left and right profiles
+                for flip in [False, True]:
+                    profile_img = cv2.flip(norm_gray, 1) if flip else norm_gray
+                    
+                    profile_detections = self.profile_cascade.detectMultiScale(
+                        profile_img,
+                        scaleFactor=1.1,
+                        minNeighbors=2,  # Lower value for more permissive detection
+                        minSize=self.min_face_size
+                    )
+                    
+                    for (x, y, w, h) in profile_detections:
+                        # If we flipped the image, adjust coordinates
+                        if flip:
+                            x = image.shape[1] - x - w
+                            
+                        face = {
+                            "rect": (x, y, w, h),
+                            "method": "profile",
+                            "score": 0.6  # Less reliable than frontal methods
+                        }
+                        all_faces.append(face)
+        except Exception as e:
+            logger.debug(f"Profile detector failed: {e}")
+        
+        # Method 4: CNN detection for blurry and difficult cases
+        # Only use if we didn't find any faces or found very few
+        if len(all_faces) < 1:
+            try:
+                # Try a more general detection approach for blurry images
+                if self.alt_cascade is not None:
+                    alt_detections = self.alt_cascade.detectMultiScale(
+                        norm_gray,
+                        scaleFactor=1.05,  # Slower but more thorough scaling
+                        minNeighbors=2,    # More permissive
+                        minSize=(30, 30)   # Smaller minimum size
+                    )
+                    
+                    for (x, y, w, h) in alt_detections:
+                        face = {
+                            "rect": (x, y, w, h),
+                            "method": "alt",
+                            "score": 0.5  # Less reliable but good for some cases
+                        }
+                        all_faces.append(face)
+            except Exception as e:
+                logger.debug(f"Alternative detector failed: {e}")
+                
+        # Special case for eyeglasses detection
+        # If still no faces found, try a more relaxed eye detection approach 
+        # which can help find faces with glasses
+        if len(all_faces) < 1:
+            try:
+                if self.eye_cascade is not None:
+                    # Detect eyes
+                    eye_detections = self.eye_cascade.detectMultiScale(
+                        norm_gray,
+                        scaleFactor=1.1,
+                        minNeighbors=2,
+                        minSize=(20, 20)
+                    )
+                    
+                    # If we found exactly 2 eyes, assume they belong to a face
+                    if len(eye_detections) == 2:
+                        # Sort by x-coordinate to find left and right eye
+                        eye_detections = sorted(eye_detections, key=lambda e: e[0])
+                        
+                        # Estimate face rectangle based on eye positions
+                        left_eye, right_eye = eye_detections
+                        
+                        # Calculate eye centers
+                        lx = left_eye[0] + left_eye[2] // 2
+                        rx = right_eye[0] + right_eye[2] // 2
+                        ly = left_eye[1] + left_eye[3] // 2
+                        ry = right_eye[1] + right_eye[3] // 2
+                        
+                        # Calculate face bounding box
+                        eye_distance = rx - lx
+                        
+                        # Face width is typically about 2.5x the eye distance
+                        face_w = int(eye_distance * 2.5)
+                        
+                        # Face height is typically about 3x the eye distance
+                        face_h = int(eye_distance * 3)
+                        
+                        # Face is centered between eyes horizontally
+                        face_x = lx - int(face_w * 0.25)
+                        
+                        # Eyes are typically at about 40-45% of face height from the top
+                        face_y = ly - int(face_h * 0.42)
+                        
+                        # Make sure coordinates are within image bounds
+                        face_x = max(0, min(face_x, w - face_w))
+                        face_y = max(0, min(face_y, h - face_h))
+                        face_w = min(face_w, w - face_x)
+                        face_h = min(face_h, h - face_y)
+                        
+                        # Add face based on eye detection
+                        face = {
+                            "rect": (face_x, face_y, face_w, face_h),
+                            "method": "eye_based",
+                            "score": 0.6  # Moderate confidence
+                        }
+                        all_faces.append(face)
+                        
+                    # If more than 2 eyes detected, try to pair them up and find potential faces
+                    elif len(eye_detections) > 2:
+                        # Sort by y-coordinate first to group eyes at similar heights
+                        eye_detections = sorted(eye_detections, key=lambda e: e[1])
+                        
+                        # Try to pair up eyes at similar heights
+                        idx = 0
+                        while idx < len(eye_detections) - 1:
+                            # Check if next eye is at similar height (within 20% of eye height)
+                            curr_eye = eye_detections[idx]
+                            next_eye = eye_detections[idx+1]
+                            
+                            if abs(curr_eye[1] - next_eye[1]) < curr_eye[3] * 0.2:
+                                # Sort this pair by x-coordinate
+                                if curr_eye[0] > next_eye[0]:
+                                    curr_eye, next_eye = next_eye, curr_eye
+                                    
+                                # Calculate face box as above
+                                lx = curr_eye[0] + curr_eye[2] // 2
+                                rx = next_eye[0] + next_eye[2] // 2
+                                ly = curr_eye[1] + curr_eye[3] // 2
+                                ry = next_eye[1] + next_eye[3] // 2
+                                
+                                eye_distance = rx - lx
+                                face_w = int(eye_distance * 2.5)
+                                face_h = int(eye_distance * 3)
+                                face_x = lx - int(face_w * 0.25)
+                                face_y = ly - int(face_h * 0.42)
+                                
+                                # Make sure coordinates are within image bounds
+                                face_x = max(0, min(face_x, w - face_w))
+                                face_y = max(0, min(face_y, h - face_h))
+                                face_w = min(face_w, w - face_x)
+                                face_h = min(face_h, h - face_y)
+                                
+                                # Add face based on eye detection
+                                face = {
+                                    "rect": (face_x, face_y, face_w, face_h),
+                                    "method": "eye_based",
+                                    "score": 0.5  # Lower confidence for multi-eye case
+                                }
+                                all_faces.append(face)
+                                
+                                # Skip the next eye as we've used it
+                                idx += 2
+                            else:
+                                # Move to next eye
+                                idx += 1
+            except Exception as e:
+                logger.debug(f"Eye-based detection failed: {e}")
+        
+        # Post-process the face detections
+        final_faces = []
+        
+        # Merge overlapping detections and validate faces
+        if all_faces:
+            # Extract rectangles for clustering
+            rects = [face["rect"] for face in all_faces]
+            
+            # Convert to dlib rectangles for better clustering
+            dlib_rects = [dlib.rectangle(r[0], r[1], r[0] + r[2], r[1] + r[3]) for r in rects]
+            
+            # Use dlib's rectangle clustering
+            try:
+                clusters = dlib.cluster_rects(dlib_rects)
+                
+                # Get average rectangle for each cluster
+                for cluster in clusters:
+                    if not cluster:
+                        continue
+                        
+                    # Get average rectangle
+                    avg_left = sum(rect.left() for rect in cluster) // len(cluster)
+                    avg_top = sum(rect.top() for rect in cluster) // len(cluster)
+                    avg_right = sum(rect.right() for rect in cluster) // len(cluster)
+                    avg_bottom = sum(rect.bottom() for rect in cluster) // len(cluster)
+                    
+                    avg_rect = (avg_left, avg_top, avg_right - avg_left, avg_bottom - avg_top)
+                    
+                    # Find the best detection score for this cluster
+                    cluster_methods = []
+                    max_score = 0
+                    
+                    for face in all_faces:
+                        rect = face["rect"]
+                        rect_center = (rect[0] + rect[2] // 2, rect[1] + rect[3] // 2)
+                        
+                        # Check if this face belongs to the cluster
+                        if (rect_center[0] >= avg_left and rect_center[0] <= avg_right and
+                            rect_center[1] >= avg_top and rect_center[1] <= avg_bottom):
+                            cluster_methods.append(face["method"])
+                            max_score = max(max_score, face["score"])
+                    
+                    if not cluster_methods:
+                        continue
+                    
+                    # Calculate validation score based on detection diversity
+                    num_methods = len(set(cluster_methods))
+                    validation_score = min(1.0, max_score + (num_methods - 1) * 0.15)
+                    
+                    # Use a more permissive threshold for validation to better handle glasses
+                    if validation_score >= min_validation_score:
+                        final_faces.append({
+                            "rect": avg_rect,
+                            "methods": list(set(cluster_methods)),
+                            "validation_score": validation_score
+                        })
+            except Exception as e:
+                logger.debug(f"Face clustering failed: {e}")
+                # Fallback: use raw detections
+                for face in all_faces:
+                    if face["score"] >= min_validation_score:
+                        final_faces.append({
+                            "rect": face["rect"],
+                            "methods": [face["method"]],
+                            "validation_score": face["score"]
+                        })
+                
+        # Return only the rectangle part for backward compatibility
+        return [face["rect"] for face in final_faces]
     
     def detect_faces(self, frame, min_validation_score=0.6, use_cache=True):
         """

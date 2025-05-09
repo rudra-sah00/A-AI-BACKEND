@@ -1,0 +1,9 @@
+{
+  "query": "How many people are visible in the corridor?",
+  "response": "Okay, here is the analysis of the security camera feed:\n\n1. DIRECT ANSWER:\nThere are no people visible in the corridor.\n\n2. SCENE OVERVIEW:\nThe scene is a corridor or outdoor storage area with several large plastic containers or tanks visible. Lighting appears dim and possibly artificial.\n\n3. SUBJECT IDENTIFICATION:\nNo persons are visible in the frame.\n\n4. OBJECT DETECTION:\n*   Several large, white plastic containers or tanks.\n*   A black plastic chair.\n*   Buckets and containers.\n*   Framed window panels leaning against the wall.\n*   A security camera mounted on the wall.\n\n5. SECURITY ASSESSMENT:\nNORMAL. No immediate threats are visible.\n",
+  "camera_id": "4d7225f8-2375-40df-977b-49158bfcf64f",
+  "camera_name": "Corridor Camera",
+  "timestamp": "2025-05-09T19:45:44.716787",
+  "model": "gemini-2.0-flash",
+  "frame_path": "/Users/rudrasahoo/Development/A-AI-BACKEND/data/unauthorized/queries/20250509_194544_4d7225f8-2375-40df-977b-49158bfcf64f.jpg"
+}

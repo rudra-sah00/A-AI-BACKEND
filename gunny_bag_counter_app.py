@@ -29,12 +29,24 @@ except ImportError:
     from app.ai_engine.models.yolo_model import YOLOModel
     logger.info("Using YOLOModel from app.ai_engine.models")
 
+# Import OllamaVisionProcessor and settings
+try:
+    from app.ai_engine.processors.ai_vision_processor import OllamaVisionProcessor
+    from app.core.config import settings
+    OLLAMA_AVAILABLE = True
+    logger.info("OllamaVisionProcessor and settings imported successfully.")
+except ImportError as e:
+    OLLAMA_AVAILABLE = False
+    logger.warning(f"Could not import OllamaVisionProcessor or settings, Ollama enhancement will be disabled: {e}")
+    OllamaVisionProcessor = None
+    settings = None
+
 class GunnyBagVideoCounter:
     """
     A standalone application that opens a video file, counts gunny bags,
     and displays the count as an overlay on the video in real-time.
     """
-    def __init__(self, model_path="app/yolov8n.pt", output_dir="data/gunny_bags", is_custom_model=False):
+    def __init__(self, model_path="app/yolov8n.pt", output_dir="data/gunny_bags", is_custom_model=False, enhance_with_ollama=False):
         """
         Initialize the counter
         
@@ -42,6 +54,7 @@ class GunnyBagVideoCounter:
             model_path: Path to the YOLO model file
             output_dir: Directory to save output files
             is_custom_model: Whether the model is a custom-trained model for gunny bags
+            enhance_with_ollama: Whether to use Ollama for enhanced output
         """
         # Initialize YOLO model
         logger.info(f"Loading YOLO model from {model_path}...")
@@ -95,6 +108,45 @@ class GunnyBagVideoCounter:
         self.detection_history = []
         self.max_history = 10  # Keep track of the last 10 frames for smoothing
         self.start_time = None
+        
+        self.ollama_processor = None
+        self.enhance_with_ollama = enhance_with_ollama and OLLAMA_AVAILABLE
+        
+        if self.enhance_with_ollama:
+            logger.info("Ollama enhancement enabled. Initializing OllamaVisionProcessor...")
+            try:
+                # Mock camera and user data for standalone script
+                mock_camera_data = {"id": "gunny_bag_cam", "name": "GunnyBagCountingCamera", "source": "video_file"}
+                mock_users_data = {} # Not used by OllamaVisionProcessor directly for queries
+                ollama_output_dir = os.path.join(output_dir, "ollama_queries")
+                
+                # Ensure settings.DATA_DIR is available if OllamaVisionProcessor uses it for prompts
+                if hasattr(settings, 'DATA_DIR'):
+                    # Assuming DATA_DIR is usually one level up from 'app'
+                    # For this standalone script, if 'data' exists at the same level as the script, use it.
+                    # Otherwise, try to infer a reasonable default.
+                    script_dir = os.path.dirname(os.path.abspath(__file__))
+                    potential_data_dir = os.path.join(script_dir, "data")
+                    if os.path.isdir(potential_data_dir):
+                         settings.DATA_DIR = potential_data_dir
+                    else:
+                        # Fallback if 'data' isn't there, this might need adjustment
+                        settings.DATA_DIR = script_dir 
+                    logger.info(f"Setting settings.DATA_DIR for Ollama prompts to: {settings.DATA_DIR}")
+
+                self.ollama_processor = OllamaVisionProcessor(
+                    camera_data=mock_camera_data,
+                    users_data=mock_users_data,
+                    output_dir=ollama_output_dir
+                )
+                # Manually activate for one-off queries as we are not running its full processing loop
+                self.ollama_processor.is_active = True
+                self.ollama_processor.last_frame = None # Will be set before query
+                logger.info("OllamaVisionProcessor initialized successfully.")
+            except Exception as e:
+                logger.error(f"Failed to initialize OllamaVisionProcessor: {e}. Ollama enhancement will be disabled.")
+                self.enhance_with_ollama = False
+                self.ollama_processor = None
         
         logger.info("GunnyBagVideoCounter initialized")
         
@@ -236,6 +288,11 @@ class GunnyBagVideoCounter:
             
             # Track max count
             max_count = 0
+            max_count_frame = None # To store the frame with the max count for Ollama
+
+            # Create a resizable window if display is enabled
+            if display:
+                cv2.namedWindow('Gunny Bag Counter', cv2.WINDOW_NORMAL)
             
             # Process frames
             while cap.isOpened():
@@ -259,9 +316,11 @@ class GunnyBagVideoCounter:
                 # Calculate smoothed count (moving average)
                 smoothed_count = int(round(sum(self.detection_history) / len(self.detection_history)))
                 
-                # Update max count
+                # Update max count and store the frame if it's the new max
                 if smoothed_count > max_count:
                     max_count = smoothed_count
+                    if self.enhance_with_ollama:
+                        max_count_frame = frame.copy() # Store a copy of the frame
                 
                 # Draw overlay and detections
                 result_frame = self._draw_overlay(frame, detections, smoothed_count, max_count, frame_count)
@@ -293,8 +352,38 @@ class GunnyBagVideoCounter:
             
             logger.info(f"Video processing completed: {self.processed_frames}/{self.total_frames} frames")
             logger.info(f"Processing speed: {processing_fps:.2f} fps")
-            logger.info(f"Maximum gunny bag count: {max_count}")
-            
+            logger.info(f"Maximum gunny bag count (YOLO): {max_count}")
+
+            ollama_description = None
+            if self.enhance_with_ollama and self.ollama_processor and max_count_frame is not None and max_count > 0:
+                logger.info(f"Requesting Ollama vision enhancement for frame with max count ({max_count})...")
+                try:
+                    # Set the last_frame for the processor to use
+                    self.ollama_processor.last_frame = max_count_frame
+                    
+                    # Craft a prompt for Ollama
+                    prompt = (
+                        f"This image is from a video feed where a YOLO model has detected a maximum of {max_count} gunny bags. "
+                        "Please provide a brief, human-readable description of the scene in this specific frame, "
+                        "focusing on the gunny bags and their context (e.g., being loaded, location). "
+                        "Confirm or comment on the presence of gunny bags based on what you see. "
+                        "For example: 'The image shows several gunny bags stacked near a truck, consistent with the count of {max_count}.'"
+                    )
+                    
+                    ollama_result = self.ollama_processor.process_query(prompt)
+                    
+                    if ollama_result and ollama_result.get("success"):
+                        ollama_description = ollama_result.get("response")
+                        logger.info(f"Ollama Vision Enhancement: {ollama_description}")
+                    else:
+                        logger.warning(f"Ollama enhancement failed: {ollama_result.get('error', 'Unknown error')}")
+                except Exception as e:
+                    logger.error(f"Error during Ollama enhancement: {str(e)}")
+            elif self.enhance_with_ollama and max_count_frame is None and max_count > 0:
+                logger.warning("Ollama enhancement was enabled, but no frame was captured for max count (max_count_frame is None).")
+            elif self.enhance_with_ollama and max_count == 0:
+                logger.info("Ollama enhancement skipped as no gunny bags were detected by YOLO.")
+
             return {
                 "success": True,
                 "max_count": max_count,
@@ -302,7 +391,8 @@ class GunnyBagVideoCounter:
                 "total_frames": self.total_frames,
                 "processing_time": elapsed_time,
                 "processing_fps": processing_fps,
-                "output_path": output_path
+                "output_path": output_path,
+                "ollama_description": ollama_description
             }
             
         except Exception as e:
@@ -392,7 +482,9 @@ class GunnyBagVideoCounter:
         
         # Draw frame info
         model_type = "Custom Model" if self.is_custom_model else "Default Model"
-        frame_info = f"Frame: {frame_number}/{self.total_frames} ({int(progress*100)}%)  Processing: {fps:.1f} fps  {time_str}  Model: {model_type}"
+        # Display original frame resolution
+        orig_res_text = f"Original Res: {frame.shape[1]}x{frame.shape[0]}"
+        frame_info = f"Frame: {frame_number}/{self.total_frames} ({int(progress*100)}%)  Proc: {fps:.1f} fps  {time_str}  {orig_res_text}  Model: {model_type}"
         cv2.putText(result_frame, frame_info, 
                   (margin, info_y), self.font, 0.6, (180, 180, 180), 1)
         
@@ -421,6 +513,7 @@ def main():
     parser.add_argument("--model", default="app/yolov8n.pt", help="Path to YOLO model")
     parser.add_argument("--threshold", type=float, default=0.1, help="Confidence threshold (0.0-1.0)")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    parser.add_argument("--enhance-with-ollama", action="store_true", help="Enable Ollama vision model for enhanced output description")
     
     args = parser.parse_args()
     
@@ -435,7 +528,8 @@ def main():
     counter = GunnyBagVideoCounter(
         model_path=args.model, 
         output_dir=args.output_dir,
-        is_custom_model=is_custom_model
+        is_custom_model=is_custom_model,
+        enhance_with_ollama=args.enhance_with_ollama
     )
     
     # Set confidence threshold from command line
@@ -449,7 +543,9 @@ def main():
     
     if result["success"]:
         logger.info("✅ Processing completed successfully")
-        logger.info(f"Maximum gunny bag count: {result['max_count']}")
+        logger.info(f"Maximum gunny bag count (YOLO): {result['max_count']}")
+        if result.get("ollama_description"):
+            logger.info(f"Enhanced Description (Ollama): {result['ollama_description']}")
         if not args.no_save and result["output_path"]:
             logger.info(f"Output saved to: {result['output_path']}")
     else:

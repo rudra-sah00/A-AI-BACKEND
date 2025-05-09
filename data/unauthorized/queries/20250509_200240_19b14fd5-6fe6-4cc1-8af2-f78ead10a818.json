@@ -1,0 +1,9 @@
+{
+  "query": "is something unusal happening in this camera??",
+  "response": "Okay, here's an analysis of the security camera feed:\n\n1.  **DIRECT ANSWER:** It's unusual to have bulk storage of what appears to be new water tanks and coiled tubing in an open outdoor space.\n\n2.  **SCENE OVERVIEW:** The scene appears to be an outdoor storage area, possibly a yard or open space, at night. The lighting is dim. The area is filled with a large number of cylindrical objects covered in plastic wrap. There are also coils of dark tubing present. Some foliage (trees/bushes) is visible in the background.\n\n3.  **SUBJECT IDENTIFICATION:** One person is vaguely visible standing in the background.\n\n4.  **OBJECT DETECTION:**\n    *   Multiple large, white cylindrical objects with blue bands, identified as \"Ashirvad\" water tanks, are stacked and stored.\n    *   Coils of black tubing, potentially plumbing or electrical conduit, are present.\n    *   There is a dark bucket-like object in the lower-left corner of the frame.\n\n5.  **SECURITY ASSESSMENT:** WARNING. While the presence of stored materials is not inherently a security threat, the unguarded bulk storage of potentially valuable items in an open outdoor area elevates the risk of theft or vandalism. The presence of a person in the background warrants further investigation.\n",
+  "camera_id": "19b14fd5-6fe6-4cc1-8af2-f78ead10a818",
+  "camera_name": "Back camera",
+  "timestamp": "2025-05-09T20:02:40.514725",
+  "model": "gemini-2.0-flash",
+  "frame_path": "/Users/rudrasahoo/Development/A-AI-BACKEND/data/unauthorized/queries/20250509_200240_19b14fd5-6fe6-4cc1-8af2-f78ead10a818.jpg"
+}

@@ -1,0 +1,9 @@
+{
+  "query": "okay fine can you identify the number of the red auto standing in the camera",
+  "response": "Okay, I can assist you with that. Here's the analysis of the security camera feed:\n\n1. DIRECT ANSWER: The number of the red auto is 7078.\n\n2. SCENE OVERVIEW: The scene appears to be an outdoor shot of a street at night. There is dim ambient lighting, with a building visible on the right side of the frame featuring a yellow facade.\n\n3. SUBJECT IDENTIFICATION: There are two individuals visible in the background seated in chairs near what appears to be a building.\n\n4. OBJECT DETECTION: A red auto (truck) is visible. Motorbikes parked along the street are seen in the background.\n\n5. SECURITY ASSESSMENT: NORMAL. There are no immediate signs of security threats visible in the image. The presence of people and vehicles is within expected parameters for a street environment.\n",
+  "camera_id": "1ea989cb-fe5e-4b08-9a46-3c785198d9a9",
+  "camera_name": "Front Main Road Camera",
+  "timestamp": "2025-05-09T20:00:04.358811",
+  "model": "gemini-2.0-flash",
+  "frame_path": "/Users/rudrasahoo/Development/A-AI-BACKEND/data/unauthorized/queries/20250509_200004_1ea989cb-fe5e-4b08-9a46-3c785198d9a9.jpg"
+}

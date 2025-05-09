@@ -1,1 +1,62 @@
-[]
+[
+    {
+        "id": "1f9317a4-4d6a-4e0f-a431-82b2aa6c96d7",
+        "person_id": "8be96f81-df45-408d-a75c-0c9209872f90",
+        "camera_id": "4d7225f8-2375-40df-977b-49158bfcf64f",
+        "camera_name": "Corridor Camera",
+        "timestamp": "2025-05-09T18:27:25.909599",
+        "date": "2025-05-09",
+        "face_path": null,
+        "face_quality": 0.0,
+        "confidence": 0.881129264831543,
+        "bbox": [
+            907.0,
+            889.0,
+            1263.0,
+            1494.0
+        ],
+        "has_face": false,
+        "is_front_facing": false,
+        "detection_method": "standard"
+    },
+    {
+        "id": "129e165b-b8a9-42d4-a304-71f212cd046d",
+        "person_id": "8be96f81-df45-408d-a75c-0c9209872f90",
+        "camera_id": "4d7225f8-2375-40df-977b-49158bfcf64f",
+        "camera_name": "Corridor Camera",
+        "timestamp": "2025-05-09T18:29:25.988331",
+        "date": "2025-05-09",
+        "face_path": null,
+        "face_quality": 0.0,
+        "confidence": 0.8103858828544617,
+        "bbox": [
+            919.0,
+            888.0,
+            1263.0,
+            1516.0
+        ],
+        "has_face": false,
+        "is_front_facing": false,
+        "detection_method": "standard"
+    },
+    {
+        "id": "5877d563-19ec-4798-9291-17dbf16582a3",
+        "person_id": "fcb5cd1e-49e9-4044-8037-685edd57d151",
+        "camera_id": "4d7225f8-2375-40df-977b-49158bfcf64f",
+        "camera_name": "Corridor Camera",
+        "timestamp": "2025-05-09T18:29:32.226900",
+        "date": "2025-05-09",
+        "face_path": null,
+        "face_quality": 0.0,
+        "confidence": 0.6696736216545105,
+        "bbox": [
+            1176.0,
+            758.0,
+            1516.0,
+            1466.0
+        ],
+        "has_face": false,
+        "is_front_facing": false,
+        "detection_method": "standard"
+    }
+]

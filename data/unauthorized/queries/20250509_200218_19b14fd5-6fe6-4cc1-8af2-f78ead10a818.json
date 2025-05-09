@@ -1,0 +1,9 @@
+{
+  "query": "what do you see in this camera",
+  "response": "1. DIRECT ANSWER: The camera feed shows a collection of large, white tanks, and coiled black tubing stored outdoors.\n\n2. SCENE OVERVIEW: The image appears to be an exterior shot taken at night. The area seems to be a storage or work yard, with stacks of tanks and other materials. The lighting is dim.\n\n3. SUBJECT IDENTIFICATION: No persons are visible in the frame.\n\n4. OBJECT DETECTION: The main objects are several large, white tanks with \"ashirvad\" and \"irvad\" branding. Also, there are coiled black tubes nearby.\n\n5. SECURITY ASSESSMENT: NORMAL. The scene appears to be a storage area. No immediate security threats are visible.\n",
+  "camera_id": "19b14fd5-6fe6-4cc1-8af2-f78ead10a818",
+  "camera_name": "Back camera",
+  "timestamp": "2025-05-09T20:02:18.759888",
+  "model": "gemini-2.0-flash",
+  "frame_path": "/Users/rudrasahoo/Development/A-AI-BACKEND/data/unauthorized/queries/20250509_200218_19b14fd5-6fe6-4cc1-8af2-f78ead10a818.jpg"
+}

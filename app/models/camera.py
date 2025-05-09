@@ -14,6 +14,7 @@ class CameraBase(BaseModel):
     name: str
     rtsp_url: str
     filters: Optional[List[FilterConfig]] = []
+    is_active: bool = False # Default to False, update when stream is confirmed
 
 
 class CameraCreate(CameraBase):
@@ -35,6 +36,7 @@ class CameraResponse(BaseModel):
     rtsp_url: str
     filters: Optional[List[FilterConfig]] = []
     message: str
+    is_active: bool = False
 
 
 class ContextualQueryRequest(BaseModel):

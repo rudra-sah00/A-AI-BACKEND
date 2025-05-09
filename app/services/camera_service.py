@@ -3,11 +3,11 @@ import os
 import uuid
 from typing import Optional, Dict, List, Any
 from datetime import datetime
-
 from app.core.config import settings
-from app.models.camera import Camera, CameraCreate
+from app.models.camera import Camera, CameraCreate, FilterConfig # Ensure FilterConfig is imported if used directly
 from app.utils.stream_validator import StreamValidator
-
+from app.core.websocket_manager import manager # Added for WebSocket broadcasting
+import asyncio # Added for running async broadcast
 
 class CameraService:
     def __init__(self):
@@ -23,11 +23,16 @@ class CameraService:
     
     def _read_cameras(self) -> Dict:
         """Read cameras from JSON file"""
+        cameras_data = {}
         try:
             with open(self.cameras_file, "r") as f:
-                return json.load(f)
+                loaded_data = json.load(f)
+                for cam_id, cam_details in loaded_data.items():
+                    if "is_active" not in cam_details:
+                        cam_details["is_active"] = False # Default for old records
+                    cameras_data[cam_id] = cam_details
+                return cameras_data
         except (FileNotFoundError, json.JSONDecodeError):
-            # If file doesn't exist or is empty/invalid JSON, return empty dict
             return {}
     
     def _write_cameras(self, cameras_data: Dict) -> None:
@@ -53,15 +58,13 @@ class CameraService:
             # Update existing camera
             cameras[camera_id]["rtsp_url"] = camera_data.rtsp_url
             cameras[camera_id]["updated_at"] = datetime.now().isoformat()
-            
-            # Update filters if provided
-            if hasattr(camera_data, 'filters'):
-                cameras[camera_id]["filters"] = [filter_config.dict() for filter_config in camera_data.filters] if camera_data.filters else []
+            cameras[camera_id]["filters"] = [filter_config.dict() for filter_config in camera_data.filters] if camera_data.filters else []
             
             # Add validation results if provided
             if validation_result:
                 cameras[camera_id]["stream_status"] = validation_result["is_valid"]
                 cameras[camera_id]["validation_result"] = validation_result
+                cameras[camera_id]["is_active"] = validation_result["is_valid"] # Update is_active status
         else:
             # Create new camera
             camera_id = str(uuid.uuid4())
@@ -73,21 +76,24 @@ class CameraService:
                 "rtsp_url": camera_data.rtsp_url,
                 "created_at": camera_data.created_at,
                 "updated_at": None,
-                "filters": [filter_config.dict() for filter_config in camera_data.filters] if camera_data.filters else []
+                "filters": [filter_config.dict() for filter_config in camera_data.filters] if camera_data.filters else [],
+                "is_active": False # Default for new camera, to be updated by validation/stream
             }
             
             # Add validation results if provided
             if validation_result:
                 camera_dict["stream_status"] = validation_result["is_valid"]
                 camera_dict["validation_result"] = validation_result
-                
+                camera_dict["is_active"] = validation_result["is_valid"] # Set is_active based on validation
+            
             cameras[camera_id] = camera_dict
         
         # Save changes
         self._write_cameras(cameras)
         
-        # Return camera data
-        return Camera(**cameras[camera_id])
+        # Before returning, ensure the camera object reflects the data just written
+        final_camera_data = cameras[camera_id]
+        return Camera(**final_camera_data)
     
     def get_camera(self, camera_id: str) -> Optional[Camera]:
         """Get a camera by ID"""
@@ -185,6 +191,33 @@ class CameraService:
             cameras_dict[camera_id] = Camera(**camera_data)
         return cameras_dict
         
+    async def update_camera_active_status(self, camera_id: str, is_active: bool) -> Optional[Camera]:
+        """Update the active status of a camera and broadcast the change."""
+        cameras = self._read_cameras()
+        if camera_id not in cameras:
+            return None
+
+        if cameras[camera_id].get("is_active") == is_active: # No change
+            return Camera(**cameras[camera_id])
+
+        cameras[camera_id]["is_active"] = is_active
+        cameras[camera_id]["updated_at"] = datetime.now().isoformat()
+        self._write_cameras(cameras)
+
+        notification_payload = {
+            "type": "camera_status_update",
+            "camera_id": camera_id,
+            "name": cameras[camera_id].get("name", "Unknown Camera"),
+            "is_active": is_active,
+            "timestamp": datetime.now().isoformat()
+        }
+        # Run broadcast in a new task to avoid blocking if called from sync code,
+        # or await if called from async. Since this service might be called from sync/async,
+        # creating a task is safer.
+        asyncio.create_task(manager.broadcast_json(notification_payload))
+        
+        return Camera(**cameras[camera_id])
+
     def validate_camera_stream(self, camera_id: str) -> Optional[Dict]:
         """Validate an existing camera's stream"""
         camera = self.get_camera(camera_id)
@@ -199,10 +232,17 @@ class CameraService:
         cameras[camera_id]["stream_status"] = validation_result["is_valid"]
         cameras[camera_id]["last_validation"] = validation_result
         cameras[camera_id]["updated_at"] = datetime.now().isoformat()
-        
-        # Save changes
+        cameras[camera_id]["is_active"] = validation_result["is_valid"] # Update is_active status
+
         self._write_cameras(cameras)
         
+        # Broadcast status change after validation
+        # This might be redundant if AI engine also calls update_camera_active_status
+        # Consider if validation itself should trigger a broadcast or if it's a separate concern.
+        # For now, let's assume AI engine will be the primary source of active status updates.
+        # However, if validation is a manual trigger, broadcasting here is useful.
+        asyncio.create_task(self.update_camera_active_status(camera_id, validation_result["is_valid"]))
+
         return validation_result
 
 # Create a singleton instance for global use

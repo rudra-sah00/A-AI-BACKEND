@@ -1,6 +1,5 @@
 import cv2
 import logging
-import os
 import numpy as np
 import time
 from typing import Dict, List, Tuple, Any, Optional
@@ -126,12 +125,14 @@ class YOLOModel:
             logger.error(f"Error extracting person image: {str(e)}")
             return None
 
-    def compare_with_reference(self, person_img, reference_img, threshold=0.6) -> Tuple[bool, float]:
+    def compare_with_reference(self, person_img, reference_img, threshold=0.4) -> Tuple[bool, float]:
         """
         Compare detected person with reference image to identify the person
         Returns a tuple of (is_match, similarity_score)
         
         Uses advanced face recognition if available, otherwise falls back to basic comparison
+        
+        Note: Threshold has been lowered from 0.6 to 0.4 to be more permissive for glasses and lighting variations
         """
         try:
             # Use face_recognition library if available for better accuracy
@@ -144,23 +145,30 @@ class YOLOModel:
             logger.error(f"Error comparing images: {str(e)}")
             return False, 0.0
             
-    def _advanced_face_compare(self, face_img, reference_img, threshold=0.6) -> Tuple[bool, float]:
+    def _advanced_face_compare(self, face_img, reference_img, threshold=0.4) -> Tuple[bool, float]:
         """
         Advanced face comparison using face_recognition library
         Creates facial embeddings and computes distance for accurate matching
+        
+        Note: Using a more permissive threshold (0.4 instead of 0.6) to better handle glasses and lighting
         """
         try:
             # Convert BGR images to RGB (face_recognition expects RGB)
             face_rgb = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
             ref_rgb = cv2.cvtColor(reference_img, cv2.COLOR_BGR2RGB)
             
+            # Enhance contrast for both images to help with feature detection
+            face_rgb = self._enhance_for_face_recognition(face_rgb)
+            ref_rgb = self._enhance_for_face_recognition(ref_rgb)
+            
             # Get face encodings (embeddings)
             # The model parameter can be:
             # - 'large': more accurate but slower
             # - 'small': faster but less accurate
             # We'll use 'small' for real-time performance, but can be changed to 'large'
-            face_encoding = face_recognition.face_encodings(face_rgb, model="small")
-            ref_encoding = face_recognition.face_encodings(ref_rgb, model="small")
+            # Make more permissive by reducing jitters and increasing tolerance for pose variations
+            face_encoding = face_recognition.face_encodings(face_rgb, model="small", num_jitters=2)
+            ref_encoding = face_recognition.face_encodings(ref_rgb, model="small", num_jitters=2)
             
             # Check if encodings were found
             if not face_encoding or not ref_encoding:
@@ -174,8 +182,8 @@ class YOLOModel:
             # Convert distance to similarity score (1 - distance)
             similarity = 1 - float(face_distance[0])
             
-            # Adjust threshold for face recognition distances (typically 0.6 is a good value)
-            adjusted_threshold = 1 - threshold
+            # Adjust threshold for face recognition distances with a more permissive value
+            adjusted_threshold = 1 - threshold  # Lower value means more permissive
             is_match = face_distance[0] <= adjusted_threshold
             
             logger.debug(f"Face comparison: distance={face_distance[0]:.4f}, similarity={similarity:.4f}, match={is_match}")
@@ -311,3 +319,29 @@ class YOLOModel:
         except Exception as e:
             logger.warning(f"Face enhancement failed: {str(e)}")
             return face_img
+
+    def _enhance_for_face_recognition(self, img):
+        """
+        Enhance image for better face recognition, especially for people with glasses
+        """
+        try:
+            # Convert to LAB color space
+            lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
+            
+            # Split channels
+            l, a, b = cv2.split(lab)
+            
+            # Apply CLAHE to the L channel for better contrast
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            cl = clahe.apply(l)
+            
+            # Merge channels
+            enhanced_lab = cv2.merge((cl, a, b))
+            
+            # Convert back to RGB
+            enhanced = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2RGB)
+            
+            return enhanced
+        except Exception as e:
+            logger.warning(f"Image enhancement failed: {e}")
+            return img

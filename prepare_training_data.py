@@ -29,7 +29,7 @@ def run_command(cmd, description):
 def main():
     parser = argparse.ArgumentParser(description="Prepare and train a custom YOLO model for gunny bag detection")
     parser.add_argument("--video", default="gunny-bag-test.mp4", help="Input video file for frame extraction")
-    parser.add_argument("--fps", type=float, default=1, help="Frames per second to extract")
+    parser.add_argument("--fps", type=float, default=2, help="Frames per second to extract") # Changed default from 1 to 2
     parser.add_argument("--skip-extraction", action="store_true", help="Skip frame extraction if already done")
     parser.add_argument("--auto-annotate", action="store_true", help="Try auto-annotation (experimental)")
     parser.add_argument("--epochs", type=int, default=50, help="Training epochs")

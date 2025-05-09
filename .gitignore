@@ -42,6 +42,7 @@ backend.log
 data/unauthorized/images/
 data/unauthorized/generated_content/
 data/unauthorized/recordings/
+data/gunny_bag_dataset/  # Added gunny bag dataset folder
 
 # Model files (large binary files)
 *.pt
